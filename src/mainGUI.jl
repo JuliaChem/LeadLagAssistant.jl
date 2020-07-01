@@ -7,18 +7,20 @@
 
 using Gtk.ShortNames, ControlSystems
 
-# Environmental variable to allow Windows decorations
-ENV["GTK_CSD"] = 0
-
 # CSS Provider
 global style_file = joinpath(dirname(Base.source_path()), "style.css")
-global provider = CssProviderLeaf(filename = style_file)
 
 # Icons path
 global ico1 = joinpath(dirname(Base.source_path()), "icons\\icon_new.ico")
 global ico2 = joinpath(dirname(Base.source_path()), "icons\\icon_close.ico")
 
 function LLAGUI()
+    # Environmental variable to allow Windows decorations
+    ENV["GTK_CSD"] = 0
+
+    # Style for CSS
+    global provider = CssProviderLeaf(filename = style_file)
+
     # Measurement of screen-size to allow compatibility to all screen devices
     global w, h = screen_size()
 
