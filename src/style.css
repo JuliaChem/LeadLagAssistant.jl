@@ -12,8 +12,8 @@ notebook#nb header tabs tab {
 	border-width: 0px;
 	border-style: solid;
 	border-color: black;
-	border-top-left-radius: 10px;
-	border-top-right-radius: 10px;
+	border-top-left-radius: 0px;
+	border-top-right-radius: 0px;
 	border-bottom-left-radius: 0px;
 	border-bottom-right-radius: 0px;
 }
@@ -26,8 +26,8 @@ notebook#nb header tabs tab:checked {
 	background:linear-gradient(to bottom, #d0451b 5%, #bc3315 100%);
 	background-color:#d0451b;
 	border-width: 0px;
-	border-top-left-radius: 10px;
-	border-top-right-radius: 10px;
+	border-top-left-radius: 0px;
+	border-top-right-radius: 0px;
 	border-bottom-left-radius: 0px;
 	border-bottom-right-radius: 0px;
 	border-right-width: 0px;
@@ -42,8 +42,21 @@ notebook#nb header tabs tab:hover {
 	background:linear-gradient(to bottom, #0061a7 5%, #007dc1 100%);
 	background-color:#0061a7;
 	border-width: 0px;
-	border-top-left-radius: 10px;
-	border-top-right-radius: 10px;
+	border-top-left-radius: 0px;
+	border-top-right-radius: 0px;
 	border-bottom-left-radius: 0px;
 	border-bottom-right-radius: 0px;
+}
+
+
+frame#gRootLFBTF {
+	border-color: grey;
+	border-style: none;
+	border-style: solid;
+}
+
+scrolledwindow#rootODScrollWin {
+	background-color: blue;
+	border-color: gray;
+	border-width: 1px;
 }
