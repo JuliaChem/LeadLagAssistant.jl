@@ -269,11 +269,11 @@ function LLAGUI()
     treeRoot = TreeView(TreeModel(listRoot))
     rowTxt = CellRendererText()
 
-    c1Root = GtkTreeViewColumn("Parameter", rowTxt, Dict([("text",0)]))
-    c2Root = GtkTreeViewColumn("Value", rowTxt, Dict([("text",1)]))
+    c1Root = TreeViewColumn("Parameter", rowTxt, Dict([("text",0)]))
+    c2Root = TreeViewColumn("Value", rowTxt, Dict([("text",1)]))
 
-    GAccessor.resizable(c1Root, true)
-    GAccessor.resizable(c2Root, true)
+    Gtk.GAccessor.resizable(c1Root, true)
+    Gtk.GAccessor.resizable(c2Root, true)
 
     push!(treeRoot, c1Root, c2Root)
 
