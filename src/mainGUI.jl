@@ -161,11 +161,15 @@ function LLAGUI()
         # Overshoot
         PO=100*exp((-ζ[1]*pi)/(sqrt(1-ζ[1]^2)))
 
+        # Settling time
+        Ts = -log(0.02)/(ζ[1]*ωn[1])
+
         listRoot[1,2] = ωn[1]
         listRoot[2,2] = ζ[1]
         listRoot[3,2] = string(ps)
         listRoot[4,2] = N(Kv)
         listRoot[7,2] = PO
+        listRoot[8,2] = Ts
     end
 
     exportTB = ToolButton("gtk-close")
@@ -294,10 +298,10 @@ function LLAGUI()
     push!(listRoot,("ζ","unsolved"))
     push!(listRoot,("Poles", "unsolved"))
     push!(listRoot,("Kv", "unsolved"))
-    push!(listRoot,("Rise Time", "unsolved"))
-    push!(listRoot,("Peak Time", "unsolved"))
+    push!(listRoot,("Rise Time (sec)", "unsolved"))
+    push!(listRoot,("Peak Time (sec)", "unsolved"))
     push!(listRoot,("Overshoot (%)", "unsolved"))
-    push!(listRoot,("Settling Time", "unsolved"))
+    push!(listRoot,("Settling Time (sec)", "unsolved"))
 
     treeRoot = TreeView(TreeModel(listRoot))
     rowTxt = CellRendererText()
