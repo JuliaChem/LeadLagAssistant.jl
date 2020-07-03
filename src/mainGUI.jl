@@ -6,6 +6,7 @@
 # Joaquín Pinto Espinoza
 
 using Gtk.ShortNames, ControlSystems, Plots, SymPy
+using Mustache, DataFrames, DefaultApplication, Dates, Printf
 pyplot()
 
 # CSS Provider
@@ -22,6 +23,16 @@ global rootRamp = "C:\\Windows\\Temp\\rootRamp.png"
 global rootRL = "C:\\Windows\\Temp\\rootRL.png"
 
 global lagStep = "C:\\Windows\\Temp\\lagStep.png"
+global lagRamp = "C:\\Windows\\Temp\\lagRamp.png"
+global lagRL = "C:\\Windows\\Temp\\lagRL.png"
+
+global leadStep = "C:\\Windows\\Temp\\leadStep.png"
+global leadRamp = "C:\\Windows\\Temp\\leadRamp.png"
+global leadRL = "C:\\Windows\\Temp\\leadRL.png"
+
+global leadlagStep = "C:\\Windows\\Temp\\leadlagStep.png"
+global leadlagRamp = "C:\\Windows\\Temp\\leadlagRamp.png"
+global leadlagRL = "C:\\Windows\\Temp\\leadlagRL.png"
 
 function LLAGUI()
     # Environmental variable to allow Windows decorations
@@ -43,8 +54,6 @@ function LLAGUI()
 
     # Apply style to mainWin from CSS
     set_gtk_property!(mainWin, :name, "mainWin")
-    screen = Gtk.GAccessor.style_context(mainWin)
-    push!(screen, StyleProvider(provider), 600)
 
     # Grid to locate widgets
     mainGrid = Grid()
@@ -74,6 +83,9 @@ function LLAGUI()
 
         set_gtk_property!(rootNumTf, :text, "")
         set_gtk_property!(rootDenTf, :text, "")
+        set_gtk_property!(exportTB, :sensitive, false)
+        set_gtk_property!(suggesLabelRoot, :label, "")
+        empty!(rootLocusTable)
     end
 
     closeTB = ToolButton("gtk-close")
@@ -127,7 +139,7 @@ function LLAGUI()
             ylabel = "Amplitude",
             framestyle = :box)
 
-        plotRootRL =  rlocusplot(Gopen, framestyle=:box, title = "")
+        plotRootRL =  rlocusplot(Gopen, framestyle=:box, title = "", lw=1, lc = :blue)
 
         savefig(plotRootStep, rootStep)
         savefig(plotRootRamp, rootRamp)
@@ -162,14 +174,47 @@ function LLAGUI()
         PO=100*exp((-ζ[1]*pi)/(sqrt(1-ζ[1]^2)))
 
         # Settling time
-        Ts = -log(0.02)/(ζ[1]*ωn[1])
+        Ts = -log(0.05)/(ζ[1]*ωn[1])
+
+        # Peak Time Response
+        Tp = π/(ωn[1]*sqrt(1 - ζ[1]^2))
 
         listRoot[1,2] = ωn[1]
         listRoot[2,2] = ζ[1]
         listRoot[3,2] = string(ps)
         listRoot[4,2] = N(Kv)
+        listRoot[5,2] = 10
+        listRoot[6,2] = Tp
         listRoot[7,2] = PO
         listRoot[8,2] = Ts
+
+        global rootLocusTable = DataFrame(Parameter = String[], Value = String[])
+
+        push!(rootLocusTable,("Wn",listRoot[1,2]))
+        push!(rootLocusTable,("L",listRoot[2,2]))
+        push!(rootLocusTable,("Closed-loop Poles", listRoot[3,2]))
+        push!(rootLocusTable,("Kv", listRoot[4,2]))
+        push!(rootLocusTable,("Rise Time", listRoot[5,2]))
+        push!(rootLocusTable,("Peak Time", listRoot[6,2]))
+        push!(rootLocusTable,("Overshoot", listRoot[7,2]))
+        push!(rootLocusTable,("Settling Time", listRoot[8,2]))
+
+        set_gtk_property!(exportTB, :sensitive, true)
+
+        if PO > 30
+            msg1 = @sprintf("Based on the overshoot: %2.4f you should use a Lead Network", PO)
+            set_gtk_property!(suggesLabelRoot, :label, msg1)
+        end
+
+        if N(Kv) < 5
+            msg1 = @sprintf("Based on Kv: %2.4f you should use a Lag Network", N(Kv))
+            set_gtk_property!(suggesLabelRoot, :label, msg1)
+        end
+
+        if (PO > 30) & (N(Kv) < 5)
+            msg1 = @sprintf("You should use a Lead-Lag Network")
+            set_gtk_property!(suggesLabelRoot, :label, msg1)
+        end
     end
 
     exportTB = ToolButton("gtk-close")
@@ -178,8 +223,87 @@ function LLAGUI()
     set_gtk_property!(exportTB, :icon_widget, imgexportTB)
     set_gtk_property!(exportTB, :label, "Export")
     set_gtk_property!(exportTB, :tooltip_markup, "Export to .pdf file")
+    set_gtk_property!(exportTB, :sensitive, false)
     signal_connect(exportTB, :clicked) do widget
+        global pathfile = save_dialog_native("Save as...", Null(), ("*.pdf",))
+        global rootLocusTable
 
+        if ~isempty(pathfile)
+            # Time for report
+            timenow = Dates.now()
+            timenow1 = Dates.format(timenow, "dd u yyyy HH:MM:SS")
+
+            if Sys.iswindows()
+                # Headers for dataframes
+                fmtH1 = string("|",repeat("c|", size(rootLocusTable,2)))
+                headerH1 = join(string.(names(rootLocusTable)), " & ")
+                rowH1 = join(["{{:$x}}" for x in map(string, names(rootLocusTable))], " & ")
+
+                LSNS = """
+                \\documentclass{article}
+                \\usepackage{graphicx}
+                \\graphicspath{ {C:/Windows/Temp/} }
+                \\usepackage[letterpaper, portrait, margin=1in]{geometry}
+                \\begin{document}
+                \\begin{center}
+                \\Huge{\\textbf{LeadLagAssistant v0.1.0}}\\\\
+                \\vspace{2mm}
+                \\large{\\textbf{Root-locus Assistant Report}}\\break
+                \\normalsize{{:time}}\n
+                \\vspace{5mm}
+                \\rule{15cm}{0.05cm}\n\n\n
+                \\vspace{2mm}
+                \\includegraphics[width=9cm, height=8cm]{rootStep}\n
+                \\normalsize{Figure 1. Step response}\n
+                \\vspace{2mm}
+                \\includegraphics[width=9cm, height=8cm]{rootRamp}\n
+                \\normalsize{Figure 2. Ramp response}\n
+                \\vspace{3mm}\n
+                \\rule{15cm}{0.05cm}\n
+                \\pagebreak
+
+                \\includegraphics[width=9cm, height=8cm]{rootRL}\n
+                \\normalsize{Figure 3. Root-locus}\n
+                \\vspace{2mm}
+
+                \\rule{15cm}{0.05cm}\n\n\n
+                \\vspace{2mm}
+                \\normalsize{Table 1. Parameters}\n
+                \\vspace{2mm}
+                \\begin{tabular}{$fmtH1}
+                \\hline
+                $headerH1\\\\
+                \\hline
+                {{#:FGH1}} $rowH1\\cr
+                {{/:FGH1}}
+                \\hline\n
+                \\end{tabular}
+
+                \\vspace{5mm}\n
+                \\end{center}
+                \\end{document}
+                """
+
+                rendered = render(LSNS, time = timenow1, FGH1 = rootLocusTable)
+
+                fileNameBase = string(basename(pathfile), ".tex")
+                fileName = string("C:\\Windows\\Temp\\", fileNameBase)
+                Base.open(fileName, "w") do file
+                    write(file, rendered)
+                end
+                run(`pdflatex -output-directory="C:\\Windows\\Temp\\" $(fileNameBase)`)
+
+                pdfName = string(pathfile, ".pdf")
+                fileNameBase = string(basename(pathfile), ".pdf")
+                fileName = string("C:\\Windows\\Temp\\", fileNameBase)
+                cp(fileName, string(pathfile, ".pdf"); force=true)
+                DefaultApplication.open(pdfName)
+            end
+
+            if Sys.islinux()
+                warn_dialog("Export as .pdf is not currently implemented on Linux Operating System", mainWin)
+            end
+        end
     end
 
     mainToolbar = Toolbar()
@@ -228,34 +352,48 @@ function LLAGUI()
 
     gridRootLFrameUp = Frame("Input Data")
     set_gtk_property!(gridRootLFrameUp, :width_request, (w*0.6)*0.4)
-    set_gtk_property!(gridRootLFrameUp, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.45)
+    set_gtk_property!(gridRootLFrameUp, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.35)
     set_gtk_property!(gridRootLFrameUp, :label_xalign, 0.50)
     set_gtk_property!(gridRootLFrameUp, :label_yalign, 0.00)
 
     # TF, List and table for input data
     gridRootLFUp = Grid()
+    set_gtk_property!(gridRootLFUp, :column_homogeneous, false)
+    set_gtk_property!(gridRootLFUp, :row_homogeneous, false)
+    set_gtk_property!(gridRootLFUp, :column_spacing, 10)
     set_gtk_property!(gridRootLFUp, :row_spacing, 10)
+    set_gtk_property!(gridRootLFUp, :margin_top, 10)
+    set_gtk_property!(gridRootLFUp, :margin_bottom, 10)
+    set_gtk_property!(gridRootLFUp, :margin_left, 10)
+    set_gtk_property!(gridRootLFUp, :margin_right, 10)
 
     # entry for TF
 
     rootNumTf = Entry()
     rootDenTf = Entry()
 
+    labelGs = Label("G(s) = ")
+    labelDen = Label("[d1,d2... dn]")
+    labelNum = Label("[n1,n2... nm]")
+
     gRootLFUpTF = Frame()
     set_gtk_property!(gRootLFUpTF, :label_xalign, 0.50)
     set_gtk_property!(gRootLFUpTF, :label_yalign, 0.00)
-    set_gtk_property!(gRootLFUpTF, :width_request, (w*0.6)*0.4)
+    set_gtk_property!(gRootLFUpTF, :width_request, (w*0.6)*0.385)
     set_gtk_property!(gRootLFUpTF, :height_request, 0.35*((h*0.75)-((h * 0.75) * 0.09))*0.50)
 
-    gridRootLFUp[1,1] = rootNumTf
-    gridRootLFUp[1,2] = rootDenTf
-    gridRootLFUp[1,3] = gRootLFUpTF
+    gridRootLFUp[1,1:2] = labelGs
+    gridRootLFUp[2,1] = labelNum
+    gridRootLFUp[2,2] = labelDen
+    gridRootLFUp[3,1] = rootNumTf
+    gridRootLFUp[3,2] = rootDenTf
+    gridRootLFUp[1:3,3] = gRootLFUpTF
 
     push!(gridRootLFrameUp, gridRootLFUp)
 
     gridRootLFrameB = Frame("Output Data")
     set_gtk_property!(gridRootLFrameB, :width_request, (w*0.6)*0.4)
-    set_gtk_property!(gridRootLFrameB, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.50)
+    set_gtk_property!(gridRootLFrameB, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.60)
     set_gtk_property!(gridRootLFrameB, :label_xalign, 0.50)
     set_gtk_property!(gridRootLFrameB, :label_yalign, 0.00)
 
@@ -273,6 +411,9 @@ function LLAGUI()
     set_gtk_property!(gridRootRFrameB, :label_xalign, 0.50)
     set_gtk_property!(gridRootRFrameB, :label_yalign, 0.00)
 
+    suggesLabelRoot = Label("")
+    push!(gridRootRFrameB, suggesLabelRoot)
+
     gridRootLeft[1,1] = gridRootLFrameUp
     gridRootLeft[1,2] = gridRootLFrameB
 
@@ -284,19 +425,26 @@ function LLAGUI()
 
     # TF, List and table for input data
     gridRootLFB = Grid()
+    set_gtk_property!(gridRootLFB, :column_homogeneous, false)
+    set_gtk_property!(gridRootLFB, :row_homogeneous, false)
+    set_gtk_property!(gridRootLFB, :column_spacing, 10)
     set_gtk_property!(gridRootLFB, :row_spacing, 10)
+    set_gtk_property!(gridRootLFB, :margin_top, 10)
+    set_gtk_property!(gridRootLFB, :margin_bottom, 10)
+    set_gtk_property!(gridRootLFB, :margin_left, 10)
+    set_gtk_property!(gridRootLFB, :margin_right, 10)
 
     gRootLFBTF = Frame()
     set_gtk_property!(gRootLFBTF, :label_xalign, 0.50)
     set_gtk_property!(gRootLFBTF, :label_yalign, 0.00)
-    set_gtk_property!(gRootLFBTF, :width_request, (w*0.6)*0.4)
+    set_gtk_property!(gRootLFBTF, :width_request, (w*0.6)*0.385)
     set_gtk_property!(gRootLFBTF, :height_request, 0.35*((h*0.75)-((h * 0.75) * 0.09))*0.50)
 
     global listRoot = ListStore(String, String)
 
     push!(listRoot,("ωn","unsolved"))
     push!(listRoot,("ζ","unsolved"))
-    push!(listRoot,("Poles", "unsolved"))
+    push!(listRoot,("Closed-loop Poles", "unsolved"))
     push!(listRoot,("Kv", "unsolved"))
     push!(listRoot,("Rise Time (sec)", "unsolved"))
     push!(listRoot,("Peak Time (sec)", "unsolved"))
@@ -316,14 +464,14 @@ function LLAGUI()
 
     rootODScrollWin = ScrolledWindow()
     set_gtk_property!(rootODScrollWin, :name, "rootODScrollWin")
-    set_gtk_property!(rootODScrollWin, :height_request, 0.55*((h*0.75)-((h * 0.75) * 0.09))*0.50)
-    screen = Gtk.GAccessor.style_context(rootODScrollWin)
-    push!(screen, StyleProvider(provider), 600)
+    set_gtk_property!(rootODScrollWin, :height_request, 0.70*((h*0.75)-((h * 0.75) * 0.09))*0.50)
 
+    rootODScrollWinF = Frame()
+    push!(rootODScrollWinF,rootODScrollWin)
     push!(rootODScrollWin,treeRoot)
 
     gridRootLFB[1,1] = gRootLFBTF
-    gridRootLFB[1,2] = rootODScrollWin
+    gridRootLFB[1,2] = rootODScrollWinF
 
     push!(gridRootLFrameB, gridRootLFB)
     # end list and tree ########################################################
