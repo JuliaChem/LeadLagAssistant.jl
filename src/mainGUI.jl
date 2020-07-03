@@ -5,7 +5,7 @@
 # Eusebio Bolaños Reynoso
 # Joaquín Pinto Espinoza
 
-using Gtk.ShortNames, ControlSystems, Plots
+using Gtk.ShortNames, ControlSystems, Plots, SymPy
 pyplot()
 
 # CSS Provider
@@ -19,6 +19,7 @@ global ico3 = joinpath(dirname(Base.source_path()), "icons\\icon_pdf.ico")
 # Images Path
 global rootStep = "C:\\Windows\\Temp\\rootStep.png"
 global rootRamp = "C:\\Windows\\Temp\\rootRamp.png"
+global rootRL = "C:\\Windows\\Temp\\rootRL.png"
 
 global lagStep = "C:\\Windows\\Temp\\lagStep.png"
 
@@ -60,10 +61,16 @@ function LLAGUI()
     signal_connect(newTB, :clicked) do widget
         empty!(imgRoot)
         empty!(imgRamp)
+        empty!(imgRL)
 
         listRoot[1,2] = "unsolved"
         listRoot[2,2] = "unsolved"
         listRoot[3,2] = "unsolved"
+        listRoot[4,2] = "unsolved"
+        listRoot[5,2] = "unsolved"
+        listRoot[6,2] = "unsolved"
+        listRoot[7,2] = "unsolved"
+        listRoot[8,2] = "unsolved"
 
         set_gtk_property!(rootNumTf, :text, "")
         set_gtk_property!(rootDenTf, :text, "")
@@ -87,14 +94,14 @@ function LLAGUI()
         global rootDenTfData = get_gtk_property(rootDenTf, :text, String)
 
         rootNumTfClean = split(rootNumTfData,",")
-        rootArrayNum = Array{Float64}(undef, length(rootNumTfClean))
+        global rootArrayNum = Array{Float64}(undef, length(rootNumTfClean))
         for i=1:length(rootNumTfClean)
             a = parse(Float64, rootNumTfClean[i])
             rootArrayNum[i] =  a
         end
 
         rootDenTfClean = split(rootDenTfData,",")
-        rootArrayDen = Array{Float64}(undef, length(rootDenTfClean))
+        global rootArrayDen = Array{Float64}(undef, length(rootDenTfClean))
         for i=1:length(rootDenTfClean)
             a = parse(Float64, rootDenTfClean[i])
             rootArrayDen[i] =  a
@@ -120,20 +127,45 @@ function LLAGUI()
             ylabel = "Amplitude",
             framestyle = :box)
 
+        plotRootRL =  rlocusplot(Gopen, framestyle=:box, title = "")
+
         savefig(plotRootStep, rootStep)
         savefig(plotRootRamp, rootRamp)
+        savefig(plotRootRL, rootRL)
 
         set_gtk_property!(imgRoot, :file, rootStep)
         set_gtk_property!(imgRamp, :file, rootRamp)
+        set_gtk_property!(imgRL, :file, rootRL)
 
         # Steady state analysis
         ωn, ζ, ps = damp(Gcerr)
 
-        println(ωn)
+        # Kv
+        s = symbols("s", real=true)
+
+        global GrealNum = 0
+        global GrealDen = 0
+
+        for i=1:length(rootArrayNum)
+            global GrealNum = GrealNum + rootArrayNum[i]*s^(length(rootArrayNum)-i)
+        end
+
+        for i=1:length(rootArrayDen)
+            global GrealDen = GrealDen + rootArrayDen[i]*s^(length(rootArrayDen)-i)
+        end
+
+        Greal = GrealNum/GrealDen
+
+        Kv = limit(Greal*s, s, 0)
+
+        # Overshoot
+        PO=100*exp((-ζ[1]*pi)/(sqrt(1-ζ[1]^2)))
 
         listRoot[1,2] = ωn[1]
         listRoot[2,2] = ζ[1]
         listRoot[3,2] = string(ps)
+        listRoot[4,2] = N(Kv)
+        listRoot[7,2] = PO
     end
 
     exportTB = ToolButton("gtk-close")
@@ -229,6 +261,7 @@ function LLAGUI()
 
     imgRoot = Image()
     imgRamp = Image()
+    imgRL = Image()
 
     gridRootRFrameB = Frame("Suggestions")
     set_gtk_property!(gridRootRFrameB, :width_request, (w*0.6)*0.57)
@@ -263,7 +296,7 @@ function LLAGUI()
     push!(listRoot,("Kv", "unsolved"))
     push!(listRoot,("Rise Time", "unsolved"))
     push!(listRoot,("Peak Time", "unsolved"))
-    push!(listRoot,("Overshoot", "unsolved"))
+    push!(listRoot,("Overshoot (%)", "unsolved"))
     push!(listRoot,("Settling Time", "unsolved"))
 
     treeRoot = TreeView(TreeModel(listRoot))
@@ -303,6 +336,7 @@ function LLAGUI()
 
     push!(rootStepFrame, imgRoot)
     push!(rootRampFrame, imgRamp)
+    push!(rootRootFrame, imgRL)
 
     push!(nbRoot, rootStepFrame, "Step Response")
     push!(nbRoot, rootRampFrame, "Ramp Response")
