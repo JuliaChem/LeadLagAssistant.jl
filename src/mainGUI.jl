@@ -7,6 +7,7 @@
 
 using Gtk.ShortNames, ControlSystems, Plots, SymPy
 using Mustache, DataFrames, DefaultApplication, Dates, Printf
+import Latexify
 pyplot()
 
 # CSS Provider
@@ -34,6 +35,16 @@ global leadlagStep = "C:\\Windows\\Temp\\leadlagStep.png"
 global leadlagRamp = "C:\\Windows\\Temp\\leadlagRamp.png"
 global leadlagRL = "C:\\Windows\\Temp\\leadlagRL.png"
 
+# TF output .tex file
+global lagTFopen = "C:\\Windows\\Temp\\lagTFopen.tex"
+global lagTFcerr = "C:\\Windows\\Temp\\lagTFcerr.tex"
+global lagTFcomp = "C:\\Windows\\Temp\\lagTFcomp.tex"
+global lagTFcerrcomp = "C:\\Windows\\Temp\\lagTFcerrcomp.tex"
+
+# Global status variables
+global rootLocusStatus = 0
+global lagStatusTF = 0
+
 function LLAGUI()
     # Environmental variable to allow Windows decorations
     ENV["GTK_CSD"] = 0
@@ -43,6 +54,9 @@ function LLAGUI()
 
     # Measurement of screen-size to allow compatibility to all screen devices
     global w, h = screen_size()
+
+    # DataFrame for RL-Assistant results
+    global rootLocusTable = DataFrame(Parameter = String[], Value = String[])
 
     # main Window
     mainWin = Window()
@@ -68,9 +82,23 @@ function LLAGUI()
     set_gtk_property!(newTB, :label, "New")
     set_gtk_property!(newTB, :tooltip_markup, "New analysis")
     signal_connect(newTB, :clicked) do widget
+        global rootLocusTable
         empty!(imgRoot)
         empty!(imgRamp)
         empty!(imgRL)
+
+        empty!(gRootUpTFImg)
+        empty!(gRootBTFImg)
+
+        empty!(imgLagRoot)
+        empty!(imgLagRamp)
+        empty!(imgLagRL)
+
+        empty!(lagTFCompCerrImg)
+        empty!(lagTFCompOpenImg)
+        empty!(lagTFOpenImg)
+        empty!(lagTFCerrImg)
+        empty!(lagTFCompImg)
 
         listRoot[1,2] = "unsolved"
         listRoot[2,2] = "unsolved"
@@ -83,9 +111,18 @@ function LLAGUI()
 
         set_gtk_property!(rootNumTf, :text, "")
         set_gtk_property!(rootDenTf, :text, "")
+        set_gtk_property!(lagNumTf, :text, "")
+        set_gtk_property!(lagDenTf, :text, "")
+        set_gtk_property!(lagKv, :text, "")
+        set_gtk_property!(lagT, :text, "")
+
         set_gtk_property!(exportTB, :sensitive, false)
         set_gtk_property!(suggesLabelRoot, :label, "")
         empty!(rootLocusTable)
+
+        @sigatom set_gtk_property!(lagCheck, :active, false)
+        global rootLocusStatus = 0
+        global lagStatusTF = 0
     end
 
     closeTB = ToolButton("gtk-close")
@@ -101,120 +138,553 @@ function LLAGUI()
     runTB = ToolButton("gtk-media-play")
     set_gtk_property!(runTB, :label, "Solve")
     signal_connect(runTB, :clicked) do widget
+        if get_gtk_property(nb, :page, Int) == 0
 
-        global rootNumTfData = get_gtk_property(rootNumTf, :text, String)
-        global rootDenTfData = get_gtk_property(rootDenTf, :text, String)
+            global rootNumTfData = get_gtk_property(rootNumTf, :text, String)
+            global rootDenTfData = get_gtk_property(rootDenTf, :text, String)
 
-        rootNumTfClean = split(rootNumTfData,",")
-        global rootArrayNum = Array{Float64}(undef, length(rootNumTfClean))
-        for i=1:length(rootNumTfClean)
-            a = parse(Float64, rootNumTfClean[i])
-            rootArrayNum[i] =  a
+            global rootNumTfClean = split(rootNumTfData,",")
+            global rootDenTfClean = split(rootDenTfData,",")
+
+            try
+                # Check t0 only numbers
+                for i=1:length(rootNumTfClean)
+                    parse(Float64, rootNumTfClean[i])
+                end
+
+                for i=1:length(rootDenTfClean)
+                    parse(Float64, rootDenTfClean[i])
+                end
+
+                # Convert to numeric values from string
+                global rootArrayNum = Array{Float64}(undef, length(rootNumTfClean))
+                for i=1:length(rootNumTfClean)
+                    a = parse(Float64, rootNumTfClean[i])
+                    rootArrayNum[i] =  a
+                end
+
+                global rootArrayDen = Array{Float64}(undef, length(rootDenTfClean))
+                for i=1:length(rootDenTfClean)
+                    a = parse(Float64, rootDenTfClean[i])
+                    rootArrayDen[i] =  a
+                end
+
+                if length(rootArrayNum) < length(rootArrayDen)
+                    global Gopen = tf(rootArrayNum,rootArrayDen)
+                    global Gcerr = feedback(Gopen)
+
+                    # Step plot
+                    yRootStep, tRootStep, xRootStep = step(Gcerr)
+
+                    # Step ramp
+                    global Gramp = tf([1],[1,0])
+                    yRootRamp, tRootRamp, xRootRamp = step(Gcerr*Gramp)
+
+                    plotRootStep = plot(tRootStep, yRootStep,
+                    xlabel = "Time (sec)",
+                    ylabel = "Amplitude",
+                    framestyle = :box)
+
+                    plotRootRamp = plot(tRootRamp,yRootRamp,
+                    xlabel = "Time (sec)",
+                    ylabel = "Amplitude",
+                    framestyle = :box)
+
+                    plotRootRL =  rlocusplot(Gopen, framestyle=:box, title = "", lw=1, lc = :blue)
+
+                    savefig(plotRootStep, rootStep)
+                    savefig(plotRootRamp, rootRamp)
+                    savefig(plotRootRL, rootRL)
+
+                    set_gtk_property!(imgRoot, :file, rootStep)
+                    set_gtk_property!(imgRamp, :file, rootRamp)
+                    set_gtk_property!(imgRL, :file, rootRL)
+
+                    # Steady state analysis
+                    ωn, ζ, ps = damp(Gcerr)
+
+                    # Kv
+                    s = symbols("s", real=true)
+
+                    global GrealNum = 0
+                    global GrealDen = 0
+
+                    for i=1:length(rootArrayNum)
+                        global GrealNum = GrealNum + rootArrayNum[i]*s^(length(rootArrayNum)-i)
+                    end
+
+                    for i=1:length(rootArrayDen)
+                        global GrealDen = GrealDen + rootArrayDen[i]*s^(length(rootArrayDen)-i)
+                    end
+
+                    Greal = GrealNum/GrealDen
+
+                    Kv = limit(Greal*s, s, 0)
+
+                    # TFopen image
+                    msgtex = Latexify.latexify(string("G(s)=", simplify(Greal)))
+                    L =
+                    """\\documentclass[border=2pt]{standalone}
+                    \\usepackage{mathtools}
+                    \\begin{document}
+                    {{:msg}}
+                    \\end{document}
+                    """
+
+                    out = render(L, msg = msgtex)
+                    filename = "C:\\Windows\\Temp\\TFopen.tex"
+
+                    Base.open(filename, "w") do file
+                        write(file, out)
+                    end
+
+                    run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "TFopen.tex"`)
+                    run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\TFopen.pdf" "C:\\Windows\\Temp\\TFopen"`)
+
+                    set_gtk_property!(gRootUpTFImg, :file, "C:\\Windows\\Temp\\TFopen-1.png")
+
+                    # TFcerr image
+                    GcerrTex = simplify(Greal/(Greal+1))
+                    msgtexcerr = Latexify.latexify(string("G(s)=", GcerrTex))
+                    L =
+                    """\\documentclass[border=2pt]{standalone}
+                    \\usepackage{mathtools}
+                    \\begin{document}
+                    {{:msg}}
+                    \\end{document}
+                    """
+
+                    out = render(L, msg = msgtexcerr)
+                    filename = "C:\\Windows\\Temp\\TFcerr.tex"
+
+                    Base.open(filename, "w") do file
+                        write(file, out)
+                    end
+
+                    run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "TFcerr.tex"`)
+                    run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\TFcerr.pdf" "C:\\Windows\\Temp\\TFcerr"`)
+
+                    set_gtk_property!(gRootBTFImg, :file, "C:\\Windows\\Temp\\TFcerr-1.png")
+
+                    # Overshoot
+                    PO=100*exp((-ζ[1]*pi)/(sqrt(1-ζ[1]^2)))
+
+                    # Settling time
+                    Ts = -log(0.05)/(ζ[1]*ωn[1])
+
+                    # Peak Time Response
+                    Tp = π/(ωn[1]*sqrt(1 - ζ[1]^2))
+
+                    # #Rise time
+                    beta = atan(ωn[1]/(ωn[1]*ζ[1]))
+                    tR = (π-beta)/ωn[1]
+
+                    listRoot[1,2] = ωn[1]
+                    listRoot[2,2] = ζ[1]
+                    listRoot[3,2] = string(ps)
+                    listRoot[4,2] = N(Kv)
+                    listRoot[5,2] = tR
+                    listRoot[6,2] = Tp
+                    listRoot[7,2] = PO
+                    listRoot[8,2] = Ts
+
+                    push!(rootLocusTable,("Wn",listRoot[1,2]))
+                    push!(rootLocusTable,("L",listRoot[2,2]))
+                    push!(rootLocusTable,("Closed-loop Poles", listRoot[3,2]))
+                    push!(rootLocusTable,("Kv", listRoot[4,2]))
+                    push!(rootLocusTable,("Rise Time", listRoot[5,2]))
+                    push!(rootLocusTable,("Peak Time", listRoot[6,2]))
+                    push!(rootLocusTable,("Overshoot", listRoot[7,2]))
+                    push!(rootLocusTable,("Settling Time", listRoot[8,2]))
+
+                    set_gtk_property!(exportTB, :sensitive, true)
+
+                    if PO > 20
+                        msg1 = @sprintf("Based on the overshoot: %2.4f you should use a Lead Network", PO)
+                        set_gtk_property!(suggesLabelRoot, :label, msg1)
+                    end
+
+                    if N(Kv) < 5
+                        msg1 = @sprintf("Based on Kv: %2.4f you should use a Lag Network", N(Kv))
+                        set_gtk_property!(suggesLabelRoot, :label, msg1)
+                    end
+
+                    if (PO > 20) & (N(Kv) < 5)
+                        msg1 = @sprintf("You should use a Lead-Lag Network")
+                        set_gtk_property!(suggesLabelRoot, :label, msg1)
+                    end
+
+                    global rootLocusStatus = 1
+                else
+                    warn_dialog("Numerator´s order must be lower than denominator", mainWin)
+                    set_gtk_property!(rootNumTf, :text, "")
+                    set_gtk_property!(rootDenTf, :text, "")
+                end
+                catch
+                    warn_dialog("Enter only numbers!", mainWin)
+                    set_gtk_property!(rootNumTf, :text, "")
+                    set_gtk_property!(rootDenTf, :text, "")
+                end
+        end
+        # Execute lag compensator
+        if get_gtk_property(nb, :page, Int) == 1
+            global lagNumTfData = get_gtk_property(lagNumTf, :text, String)
+            global lagDenTfData = get_gtk_property(lagDenTf, :text, String)
+            global lagKvData = get_gtk_property(lagKv, :text, String)
+            global lagTData = get_gtk_property(lagT, :text, String)
+
+            global lagNumTfClean = split(lagNumTfData,",")
+            global lagDenTfClean = split(lagDenTfData,",")
+            global lagKvClean = split(lagKvData,",")
+            global lagTClean = split(lagTData,",")
+
+
+            try
+                # Check t0 only numbers
+                for i=1:length(lagNumTfClean)
+                    parse(Float64, lagNumTfClean[i])
+                end
+
+                for i=1:length(lagDenTfClean)
+                    parse(Float64, lagDenTfClean[i])
+                end
+
+                # Convert to numeric values from string
+                global lagArrayNum = Array{Float64}(undef, length(lagNumTfClean))
+                for i=1:length(lagNumTfClean)
+                    a = parse(Float64, lagNumTfClean[i])
+                    lagArrayNum[i] =  a
+                end
+
+                global lagArrayDen = Array{Float64}(undef, length(lagDenTfClean))
+                for i=1:length(lagDenTfClean)
+                    a = parse(Float64, lagDenTfClean[i])
+                    lagArrayDen[i] =  a
+                end
+
+                global lagStatusTF = 1
+            catch
+                warn_dialog("Enter only numbers!", mainWin)
+                set_gtk_property!(lagNumTf, :text, "")
+                set_gtk_property!(lagDenTf, :text, "")
+            end
+
+            if lagStatusTF == 1
+                if length(lagKvClean) > 1
+                    warn_dialog("Enter only 1 value for Kv", mainWin)
+                    set_gtk_property!(lagKv, :text, "")
+                else
+                    try
+                        parse(Float64, lagKvClean[1])
+
+                        global lagKvNum = parse(Float64, lagKvClean[1])
+                    catch
+                        warn_dialog("Enter only numbers!", mainWin)
+                        set_gtk_property!(lagKv, :text, "")
+                    end
+                end
+
+                if length(lagTClean) > 1
+                    warn_dialog("Enter only 1 value for T", mainWin)
+                    set_gtk_property!(lagT, :text, "")
+                else
+                    try
+                        parse(Float64, lagTClean[1])
+
+                        global lagTNum = parse(Float64, lagTClean[1])
+                    catch
+                        warn_dialog("Enter only numbers!", mainWin)
+                        set_gtk_property!(lagT, :text, "")
+                    end
+                end
+
+                try
+                    if length(lagArrayNum) < length(lagArrayDen)
+                        global Gopen = tf(lagArrayNum,lagArrayDen)
+                        global Gcerr = feedback(Gopen)
+
+                        # Steady state analysis
+                        ωn1, ζ1, ps1 = damp(Gcerr)
+
+                        # Kv
+                        s = symbols("s", real=true)
+
+                        global GrealNum = 0
+                        global GrealDen = 0
+
+                        for i=1:length(lagArrayNum)
+                            global GrealNum = GrealNum + lagArrayNum[i]*s^(length(lagArrayNum)-i)
+                        end
+
+                        for i=1:length(lagArrayDen)
+                            global GrealDen = GrealDen + lagArrayDen[i]*s^(length(lagArrayDen)-i)
+                        end
+
+                        Greal1 = GrealNum/GrealDen
+
+                        Kv1 = limit(Greal1*s, s, 0)
+
+                        # TFopen image
+                        msgtex = Latexify.latexify(string("G(s)=", simplify(Greal1)))
+                        L =
+                        """\\documentclass[border=2pt]{standalone}
+                        \\usepackage{mathtools}
+                        \\begin{document}
+                        {{:msg}}
+                        \\end{document}
+                        """
+
+                        out = render(L, msg = msgtex)
+                        filename = "C:\\Windows\\Temp\\lagTFopen.tex"
+
+                        Base.open(filename, "w") do file
+                            write(file, out)
+                        end
+
+                        run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "lagTFopen.tex"`)
+                        run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\TFopen.pdf" "C:\\Windows\\Temp\\lagTFopen"`)
+
+                        set_gtk_property!(lagTFOpenImg, :file, "C:\\Windows\\Temp\\lagTFopen-1.png")
+
+                        # TFcerr image
+                        GcerrTex1 = simplify(Greal1/(Greal1+1))
+                        msgtexcerr = Latexify.latexify(string("G(s)=", GcerrTex1))
+                        L =
+                        """\\documentclass[border=2pt]{standalone}
+                        \\usepackage{mathtools}
+                        \\begin{document}
+                        {{:msg}}
+                        \\end{document}
+                        """
+
+                        out = render(L, msg = msgtexcerr)
+                        filename = "C:\\Windows\\Temp\\lagTFcerr.tex"
+
+                        Base.open(filename, "w") do file
+                            write(file, out)
+                        end
+
+                        run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "lagTFcerr.tex"`)
+                        run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\TFcerr.pdf" "C:\\Windows\\Temp\\lagTFcerr"`)
+
+                        set_gtk_property!(lagTFCerrImg, :file, "C:\\Windows\\Temp\\lagTFcerr-1.png")
+
+                        # uncompensated
+                        # Overshoot
+                        PO1 = 100*exp((-ζ1[1]*pi)/(sqrt(1-ζ1[1]^2)))
+
+                        # Settling time
+                        Ts1 = -log(0.05)/(ζ1[1]*ωn1[1])
+
+                        # Peak Time Response
+                        Tp1 = π/(ωn1[1]*sqrt(1 - ζ1[1]^2))
+
+                        # #Rise time
+                        beta1 = atan(ωn1[1]/(ωn1[1]*ζ1[1]))
+                        tR1 = (π-beta1)/ωn1[1]
+
+                        # β
+                        β = lagKvNum / N(Kv1)
+
+                        # Zero
+                        global Zero = -1 / lagTNum
+                        global Pole = -1 / (β*lagTNum)
+
+                        # TF compensator
+
+                        Gc1 = tf([1, - Zero],[1, - Pole])
+
+                        msgtexcerr = Latexify.latexify(string("G(s)=Kc*",(1*s-Zero)/(1*s-Pole)))
+                        L =
+                        """\\documentclass[border=2pt]{standalone}
+                        \\usepackage{mathtools}
+                        \\begin{document}
+                        {{:msg}}
+                        \\end{document}
+                        """
+
+                        out = render(L, msg = msgtexcerr)
+                        filename = "C:\\Windows\\Temp\\lagGc.tex"
+
+                        Base.open(filename, "w") do file
+                            write(file, out)
+                        end
+
+                        run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "lagGc.tex"`)
+                        run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\lagGc.pdf" "C:\\Windows\\Temp\\lagGc"`)
+
+                        set_gtk_property!(lagTFCompImg, :file, "C:\\Windows\\Temp\\lagGc-1.png")
+
+                        GcCerr1 = feedback(Gc1*Gopen)
+                        ωn2, ζ2, ps2 = damp(GcCerr1)
+
+                        # Compensated
+                        # Overshoot
+                        PO2 = 100*exp((-ζ2[2]*pi)/(sqrt(1-ζ2[2]^2)))
+
+                        # Settling time
+                        Ts2 = -log(0.05)/(ζ2[2]*ωn2[2])
+
+                        # Peak Time Response
+                        Tp2 = π/(ωn2[2]*sqrt(1 - ζ2[2]^2))
+
+                        # #Rise time
+                        beta2 = atan(ωn2[2]/(ωn2[2]*ζ2[2]))
+                        tR2 = (π-beta2)/ωn2[2]
+
+                        Greal2 = subs(Greal1, s, ps2[2])
+                        Greal2 = simplify(Greal2)
+                        ϕ = atand(imag(N(Greal2)) / real(N(Greal2)))
+
+                        Kc = 1 / sqrt((imag(Greal2)^2) + (real(Greal2)^2))
+
+
+                        # List of values
+                        listLag[1,2] = ωn1[1]
+                        listLag[1,3] = ωn2[2]
+
+                        listLag[2,2] = ζ1[1]
+                        listLag[2,3] = ζ2[2]
+
+                        listLag[3,2] = string(ps1)
+                        listLag[3,3] = string(ps2)
+
+                        listLag[4,2] = N(Kv1)
+                        listLag[4,3] = lagKvNum
+
+                        listLag[5,2] = tR1
+                        listLag[5,3] = tR2
+
+                        listLag[6,2] = Tp1
+                        listLag[6,3] = Tp2
+
+                        listLag[7,2] = PO1
+                        listLag[7,3] = PO2
+
+                        listLag[8,2] = Ts1
+                        listLag[8,3] = Ts2
+
+                        listLag[9,3] = ϕ
+
+                        listLag[10,3] = Pole
+                        listLag[11,3] = Zero
+                        listLag[12,3] = β
+
+                        listLag[13,3] = Kc
+
+                        # Step plot
+                        yLagStep, tLagStep, xLagStep = step(Gcerr)
+
+                        GCcerr = feedback(Kc*Gc1*Gopen)
+                        yLagStep2, tLagStep2, xLagStep2 = step(GCcerr)
+
+                        # Step ramp
+                        global Gramp = tf([1],[1,0])
+                        yLagRamp, tLagRamp, xLagRamp = step(Gcerr*Gramp)
+                        yLagRamp2, tLagRamp2, xLagRamp2 = step(GCcerr*Gramp)
+
+                        plotLagStep = plot(tLagStep, yLagStep,
+                        xlabel = "Time (sec)",
+                        ylabel = "Amplitude",
+                        framestyle = :box,
+                        label = "Uncompensated")
+                        plot!(tLagStep2, yLagStep2, label="Uncompensated")
+
+                        plotLagRamp = plot(tLagRamp,yLagRamp,
+                        xlabel = "Time (sec)",
+                        ylabel = "Amplitude",
+                        framestyle = :box,
+                        label = "Uncompensated")
+                        plot!(tLagRamp2,yLagRamp2, label = "Compensated")
+
+                        plotLagRL =  rlocusplot(Kc*Gc1*Gopen, framestyle=:box, title = "", lw=1, lc = :blue)
+
+                        savefig(plotLagStep, lagStep)
+                        savefig(plotLagRamp, lagRamp)
+                        savefig(plotLagRL, lagRL)
+
+                        set_gtk_property!(imgLagRoot, :file, lagStep)
+                        set_gtk_property!(imgLagRamp, :file, lagRamp)
+                        set_gtk_property!(imgLagRL, :file, lagRL)
+
+                        # TFCopen image
+                        TFCopen = Kc*Greal1*((1*s-Zero)/(1*s-Pole))
+                        msgtex = Latexify.latexify(string("Gc(s)*G(s)=", simplify(TFCopen)))
+                        L =
+                        """\\documentclass[border=2pt]{standalone}
+                        \\usepackage{mathtools}
+                        \\begin{document}
+                        {{:msg}}
+                        \\end{document}
+                        """
+
+                        out = render(L, msg = msgtex)
+                        filename = "C:\\Windows\\Temp\\lagTFCopen.tex"
+
+                        Base.open(filename, "w") do file
+                            write(file, out)
+                        end
+
+                        run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "lagTFCopen.tex"`)
+                        run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\lagTFCopen.pdf" "C:\\Windows\\Temp\\lagTFCopen"`)
+
+                        set_gtk_property!(lagTFCompOpenImg, :file, "C:\\Windows\\Temp\\lagTFCopen-1.png")
+
+                        # TFCopen image
+                        TFCopen = Kc*Greal1*((1*s-Zero)/(1*s-Pole))
+                        TFCcerr = TFCopen/(1 + TFCopen)
+                        msgtex = Latexify.latexify(string("C(s)/R(s)=", simplify(TFCcerr)))
+                        L =
+                        """\\documentclass[border=2pt]{standalone}
+                        \\usepackage{mathtools}
+                        \\begin{document}
+                        {{:msg}}
+                        \\end{document}
+                        """
+
+                        out = render(L, msg = msgtex)
+                        filename = "C:\\Windows\\Temp\\lagTFCcerr.tex"
+
+                        Base.open(filename, "w") do file
+                            write(file, out)
+                        end
+
+                        run(`pdflatex -output-directory="C:\\Windows\\Temp\\" "lagTFCcerr.tex"`)
+                        run(`pdftocairo -png -r 300 "C:\\Windows\\Temp\\lagTFCcerr.pdf" "C:\\Windows\\Temp\\lagTFCcerr"`)
+
+                        set_gtk_property!(lagTFCompCerrImg, :file, "C:\\Windows\\Temp\\lagTFCcerr-1.png")
+                    #     push!(rootLocusTable,("Wn",listRoot[1,2]))
+                    #     push!(rootLocusTable,("L",listRoot[2,2]))
+                    #     push!(rootLocusTable,("Closed-loop Poles", listRoot[3,2]))
+                    #     push!(rootLocusTable,("Kv", listRoot[4,2]))
+                    #     push!(rootLocusTable,("Rise Time", listRoot[5,2]))
+                    #     push!(rootLocusTable,("Peak Time", listRoot[6,2]))
+                    #     push!(rootLocusTable,("Overshoot", listRoot[7,2]))
+                    #     push!(rootLocusTable,("Settling Time", listRoot[8,2]))
+                    #
+                    #     set_gtk_property!(exportTB, :sensitive, true)
+                    else
+                        warn_dialog("Numerator´s order must be lower than denominator", mainWin)
+                        set_gtk_property!(lagNumTf, :text, "")
+                        set_gtk_property!(lagDenTf, :text, "")
+                    end
+                catch
+                    println("Error en lag")
+                end
+
+            end
         end
 
-        rootDenTfClean = split(rootDenTfData,",")
-        global rootArrayDen = Array{Float64}(undef, length(rootDenTfClean))
-        for i=1:length(rootDenTfClean)
-            a = parse(Float64, rootDenTfClean[i])
-            rootArrayDen[i] =  a
+        # Execute lag compensator
+        if get_gtk_property(nb, :page, Int) == 2
+
         end
 
-        global Gopen = tf(rootArrayNum,rootArrayDen)
-        global Gcerr = feedback(Gopen)
+        # Execute lag compensator
+        if get_gtk_property(nb, :page, Int) == 3
 
-        # Step plot
-        yRootStep, tRootStep, xRootStep = step(Gcerr)
-
-        # Step ramp
-        global Gramp = tf([1],[1,0,0])
-        yRootRamp, tRootRamp, xRootRamp = step(Gcerr*Gramp)
-
-        plotRootStep = plot(tRootStep, yRootStep,
-            xlabel = "Time (sec)",
-            ylabel = "Amplitude",
-            framestyle = :box)
-
-        plotRootRamp = plot(tRootRamp,yRootRamp,
-            xlabel = "Time (sec)",
-            ylabel = "Amplitude",
-            framestyle = :box)
-
-        plotRootRL =  rlocusplot(Gopen, framestyle=:box, title = "", lw=1, lc = :blue)
-
-        savefig(plotRootStep, rootStep)
-        savefig(plotRootRamp, rootRamp)
-        savefig(plotRootRL, rootRL)
-
-        set_gtk_property!(imgRoot, :file, rootStep)
-        set_gtk_property!(imgRamp, :file, rootRamp)
-        set_gtk_property!(imgRL, :file, rootRL)
-
-        # Steady state analysis
-        ωn, ζ, ps = damp(Gcerr)
-
-        # Kv
-        s = symbols("s", real=true)
-
-        global GrealNum = 0
-        global GrealDen = 0
-
-        for i=1:length(rootArrayNum)
-            global GrealNum = GrealNum + rootArrayNum[i]*s^(length(rootArrayNum)-i)
         end
 
-        for i=1:length(rootArrayDen)
-            global GrealDen = GrealDen + rootArrayDen[i]*s^(length(rootArrayDen)-i)
-        end
-
-        Greal = GrealNum/GrealDen
-
-        Kv = limit(Greal*s, s, 0)
-
-        # Overshoot
-        PO=100*exp((-ζ[1]*pi)/(sqrt(1-ζ[1]^2)))
-
-        # Settling time
-        Ts = -log(0.05)/(ζ[1]*ωn[1])
-
-        # Peak Time Response
-        Tp = π/(ωn[1]*sqrt(1 - ζ[1]^2))
-
-        listRoot[1,2] = ωn[1]
-        listRoot[2,2] = ζ[1]
-        listRoot[3,2] = string(ps)
-        listRoot[4,2] = N(Kv)
-        listRoot[5,2] = 10
-        listRoot[6,2] = Tp
-        listRoot[7,2] = PO
-        listRoot[8,2] = Ts
-
-        global rootLocusTable = DataFrame(Parameter = String[], Value = String[])
-
-        push!(rootLocusTable,("Wn",listRoot[1,2]))
-        push!(rootLocusTable,("L",listRoot[2,2]))
-        push!(rootLocusTable,("Closed-loop Poles", listRoot[3,2]))
-        push!(rootLocusTable,("Kv", listRoot[4,2]))
-        push!(rootLocusTable,("Rise Time", listRoot[5,2]))
-        push!(rootLocusTable,("Peak Time", listRoot[6,2]))
-        push!(rootLocusTable,("Overshoot", listRoot[7,2]))
-        push!(rootLocusTable,("Settling Time", listRoot[8,2]))
-
-        set_gtk_property!(exportTB, :sensitive, true)
-
-        if PO > 30
-            msg1 = @sprintf("Based on the overshoot: %2.4f you should use a Lead Network", PO)
-            set_gtk_property!(suggesLabelRoot, :label, msg1)
-        end
-
-        if N(Kv) < 5
-            msg1 = @sprintf("Based on Kv: %2.4f you should use a Lag Network", N(Kv))
-            set_gtk_property!(suggesLabelRoot, :label, msg1)
-        end
-
-        if (PO > 30) & (N(Kv) < 5)
-            msg1 = @sprintf("You should use a Lead-Lag Network")
-            set_gtk_property!(suggesLabelRoot, :label, msg1)
-        end
     end
 
     exportTB = ToolButton("gtk-close")
@@ -317,7 +787,7 @@ function LLAGUI()
     ############################################################################
     # main Notebook
     ############################################################################
-    nb = Notebook()
+    global nb = Notebook()
     set_gtk_property!(nb, :tab_pos, 3)
     set_gtk_property!(nb, :name, "nb")
     screen = Gtk.GAccessor.style_context(nb)
@@ -382,6 +852,11 @@ function LLAGUI()
     set_gtk_property!(gRootLFUpTF, :width_request, (w*0.6)*0.385)
     set_gtk_property!(gRootLFUpTF, :height_request, 0.35*((h*0.75)-((h * 0.75) * 0.09))*0.50)
 
+    gRootUpTFImg = Image()
+    gRootUpTFImgScroll = ScrolledWindow()
+    push!(gRootUpTFImgScroll,gRootUpTFImg)
+    push!(gRootLFUpTF, gRootUpTFImgScroll)
+
     gridRootLFUp[1,1:2] = labelGs
     gridRootLFUp[2,1] = labelNum
     gridRootLFUp[2,2] = labelDen
@@ -439,6 +914,11 @@ function LLAGUI()
     set_gtk_property!(gRootLFBTF, :label_yalign, 0.00)
     set_gtk_property!(gRootLFBTF, :width_request, (w*0.6)*0.385)
     set_gtk_property!(gRootLFBTF, :height_request, 0.35*((h*0.75)-((h * 0.75) * 0.09))*0.50)
+
+    gRootBTFImg = Image()
+    gRootBTFImgScroll = ScrolledWindow()
+    push!(gRootBTFImgScroll,gRootBTFImg)
+    push!(gRootLFBTF, gRootBTFImgScroll)
 
     global listRoot = ListStore(String, String)
 
@@ -526,26 +1006,194 @@ function LLAGUI()
 
     gridLagLFrameUp = Frame("Input Data")
     set_gtk_property!(gridLagLFrameUp, :width_request, (w*0.6)*0.4)
-    set_gtk_property!(gridLagLFrameUp, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.45)
+    set_gtk_property!(gridLagLFrameUp, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.35)
     set_gtk_property!(gridLagLFrameUp, :label_xalign, 0.50)
     set_gtk_property!(gridLagLFrameUp, :label_yalign, 0.00)
 
+    # TF, List and table for input data
+    gridLagLFUp = Grid()
+    set_gtk_property!(gridLagLFUp, :column_homogeneous, false)
+    set_gtk_property!(gridLagLFUp, :row_homogeneous, false)
+    set_gtk_property!(gridLagLFUp, :column_spacing, 10)
+    set_gtk_property!(gridLagLFUp, :row_spacing, 10)
+    set_gtk_property!(gridLagLFUp, :margin_top, 10)
+    set_gtk_property!(gridLagLFUp, :margin_bottom, 10)
+    set_gtk_property!(gridLagLFUp, :margin_left, 10)
+    set_gtk_property!(gridLagLFUp, :margin_right, 10)
+    set_gtk_property!(gridLagLFUp, :valign, 3)
+    set_gtk_property!(gridLagLFUp, :halign, 3)
+
+    # entry for TF
+
+    lagNumTf = Entry()
+    lagDenTf = Entry()
+
+    labelLagGs = Label("G(s) = ")
+    labelLagDen = Label("[d1,d2... dn]")
+    labelLagNum = Label("[n1,n2... nm]")
+
+    # Entry for Kv, T
+    lagT = Entry()
+    lagKv = Entry()
+    lagTLabel = Label("T:")
+    lagKvLabel = Label("Kv:")
+
+    global lagCheck = CheckButton("Copy from Root-locus Assistant")
+    signal_connect(lagCheck, :toggled) do widget
+        checkLagStatus = get_gtk_property(lagCheck, :active, Bool)
+
+        if rootLocusStatus == 1
+            if checkLagStatus == true
+                global rootNumTfData = get_gtk_property(rootNumTf, :text, String)
+                global rootDenTfData = get_gtk_property(rootDenTf, :text, String)
+
+                set_gtk_property!(lagNumTf, :text, rootNumTfData)
+                set_gtk_property!(lagDenTf, :text, rootDenTfData)
+            else
+                set_gtk_property!(lagNumTf, :text, "")
+                set_gtk_property!(lagDenTf, :text, "")
+            end
+        else
+            if checkLagStatus == true
+                @sigatom set_gtk_property!(lagCheck, :active, false)
+                warn_dialog("Data are not available from Root-Locus Assistant", mainWin)
+            end
+        end
+    end
+
+    gridLagLFUp[1,1:2] = labelLagGs
+    gridLagLFUp[2,1] = labelLagNum
+    gridLagLFUp[2,2] = labelLagDen
+    gridLagLFUp[3,1] = lagNumTf
+    gridLagLFUp[3,2] = lagDenTf
+    gridLagLFUp[1:3,3] = lagCheck
+    gridLagLFUp[1:2,4] = lagTLabel
+    gridLagLFUp[1:2,5] = lagKvLabel
+    gridLagLFUp[3,4] = lagT
+    gridLagLFUp[3,5] = lagKv
+
+    push!(gridLagLFrameUp, gridLagLFUp)
+
     gridLagLFrameB = Frame("Output Data")
     set_gtk_property!(gridLagLFrameB, :width_request, (w*0.6)*0.4)
-    set_gtk_property!(gridLagLFrameB, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.50)
+    set_gtk_property!(gridLagLFrameB, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.60)
     set_gtk_property!(gridLagLFrameB, :label_xalign, 0.50)
     set_gtk_property!(gridLagLFrameB, :label_yalign, 0.00)
 
     gridLagRFrameUp = Frame()
     set_gtk_property!(gridLagRFrameUp, :width_request, (w*0.6)*0.57)
     set_gtk_property!(gridLagRFrameUp, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.70)
-    set_gtk_property!(gridLagRFrameUp, :label_xalign, 0.50)
+
+    imgLagRoot = Image()
+    imgLagRamp = Image()
+    imgLagRL = Image()
+    imgLOpAmp = Image()
 
     gridLagRFrameB = Frame("Operational Amp")
     set_gtk_property!(gridLagRFrameB, :width_request, (w*0.6)*0.57)
     set_gtk_property!(gridLagRFrameB, :height_request, ((h*0.75)-((h * 0.75) * 0.09))*0.25)
     set_gtk_property!(gridLagRFrameB, :label_xalign, 0.50)
     set_gtk_property!(gridLagRFrameB, :label_yalign, 0.00)
+
+    # TF, List and table for input data
+    gridLagLFB = Grid()
+    set_gtk_property!(gridLagLFB, :column_homogeneous, false)
+    set_gtk_property!(gridLagLFB, :row_homogeneous, false)
+    set_gtk_property!(gridLagLFB, :column_spacing, 10)
+    set_gtk_property!(gridLagLFB, :row_spacing, 10)
+    set_gtk_property!(gridLagLFB, :margin_top, 10)
+    set_gtk_property!(gridLagLFB, :margin_bottom, 10)
+    set_gtk_property!(gridLagLFB, :margin_left, 10)
+    set_gtk_property!(gridLagLFB, :margin_right, 10)
+
+    lagNbTF = Notebook()
+
+    lagTFOpenImg = Image()
+    lagTFOpenFrame = Frame(lagTFOpenImg)
+    lagTFOpenFrameScroll = ScrolledWindow(lagTFOpenFrame)
+    set_gtk_property!(lagTFOpenFrameScroll, :tooltip_markup, "Uncompensated Open-loop transfer function")
+
+    lagTFCerrImg = Image()
+    lagTFCerrFrame = Frame(lagTFCerrImg)
+    lagTFCerrFrameScroll = ScrolledWindow(lagTFCerrFrame)
+    set_gtk_property!(lagTFCerrFrameScroll, :tooltip_markup, "Uncompensated Closed-loop transfer function")
+
+    lagTFCompImg = Image()
+    lagTFCompFrame = Frame(lagTFCompImg)
+    lagTFCompFrameScroll = ScrolledWindow(lagTFCompFrame)
+    set_gtk_property!(lagTFCompFrameScroll, :tooltip_markup, "Lag compensator transfer function")
+
+    lagTFCompOpenImg = Image()
+    lagTFCompOpenFrame = Frame(lagTFCompOpenImg)
+    lagTFCompOpenFrameScroll = ScrolledWindow(lagTFCompOpenFrame)
+    set_gtk_property!(lagTFCompOpenFrameScroll, :tooltip_markup, "Compensated Open-loop transfer function")
+
+    lagTFCompCerrImg = Image()
+    lagTFOpenCerrFrame = Frame(lagTFCompCerrImg)
+    lagTFOpenCerrFrameScroll = ScrolledWindow(lagTFOpenCerrFrame)
+    set_gtk_property!(lagTFOpenCerrFrameScroll, :tooltip_markup, "Compensated Closed-loop transfer function")
+
+    push!(lagNbTF, lagTFOpenFrameScroll, "G(s)")
+    push!(lagNbTF, lagTFCerrFrameScroll, "C(s)/R(s)")
+    push!(lagNbTF, lagTFCompFrameScroll, "Gc(s)")
+    push!(lagNbTF, lagTFCompOpenFrameScroll, "Gc(s)*G(s)")
+    push!(lagNbTF, lagTFOpenCerrFrameScroll, "C(s)/R(s)")
+
+    gLagLFBTF = Frame()
+    set_gtk_property!(gLagLFBTF, :label_xalign, 0.50)
+    set_gtk_property!(gLagLFBTF, :label_yalign, 0.00)
+    set_gtk_property!(gLagLFBTF, :width_request, (w*0.6)*0.385)
+    set_gtk_property!(gLagLFBTF, :height_request, 0.40*((h*0.75)-((h * 0.75) * 0.09))*0.50)
+
+    gLagLFBTFScroll = ScrolledWindow()
+    push!(gLagLFBTFScroll,lagNbTF)
+    push!(gLagLFBTF,gLagLFBTFScroll)
+
+    global listLag = ListStore(String, String, String)
+
+    push!(listLag,("ωn","unsolved","unsolved"))
+    push!(listLag,("ζ","unsolved", "unsolved"))
+    push!(listLag,("Poles", "unsolved", "unsolved"))
+    push!(listLag,("Kv", "unsolved", "unsolved"))
+    push!(listLag,("Rise Time (sec)", "unsolved", "unsolved"))
+    push!(listLag,("Peak Time (sec)", "unsolved", "unsolved"))
+    push!(listLag,("Overshoot (%)", "unsolved", "unsolved"))
+    push!(listLag,("Settling Time (sec)", "unsolved", "unsolved"))
+    push!(listLag,("Angle contribution (degrees)", "---", "unsolved"))
+    push!(listLag,("Pole", "---", "unsolved"))
+    push!(listLag,("Zero", "---", "unsolved"))
+    push!(listLag,("β", "---", "unsolved"))
+    push!(listLag,("Kc", "---", "unsolved"))
+
+    treeLag = TreeView(TreeModel(listLag))
+    rowTxtL = CellRendererText()
+
+    c1Lag = TreeViewColumn("Parameter", rowTxtL, Dict([("text",0)]))
+    c2Lag = TreeViewColumn("Original Value", rowTxtL, Dict([("text",1)]))
+    c3Lag = TreeViewColumn("Compensated Value", rowTxtL, Dict([("text",2)]))
+
+    Gtk.GAccessor.resizable(c1Lag, true)
+    Gtk.GAccessor.resizable(c2Lag, true)
+    Gtk.GAccessor.resizable(c3Lag, true)
+
+    push!(treeLag, c1Lag, c2Lag, c3Lag)
+
+    lagODScrollWin = ScrolledWindow()
+    set_gtk_property!(lagODScrollWin, :name, "lagODScrollWin")
+    set_gtk_property!(lagODScrollWin, :height_request, 0.65*((h*0.75)-((h * 0.75) * 0.09))*0.50)
+    screen = Gtk.GAccessor.style_context(lagODScrollWin)
+    push!(screen, StyleProvider(provider), 600)
+
+    lagODScrollWinF = Frame()
+    push!(lagODScrollWin,treeLag)
+    push!(lagODScrollWinF,lagODScrollWin)
+
+    gridLagLFB[1,1] = gLagLFBTF
+    gridLagLFB[1,2] = lagODScrollWinF
+
+    push!(gridLagLFrameB, gridLagLFB)
+    # end list and tree ########################################################
+
 
     gridLagLeft[1,1] = gridLagLFrameUp
     gridLagLeft[1,2] = gridLagLFrameB
@@ -566,6 +1214,10 @@ function LLAGUI()
     lagRampFrame = Frame()
     lagRootFrame = Frame()
     lagAmpOpFrame = Frame()
+
+    push!(lagStepFrame, imgLagRoot)
+    push!(lagRampFrame, imgLagRamp)
+    push!(lagRootFrame, imgLagRL)
 
     push!(nbLag, lagStepFrame, "Step Response")
     push!(nbLag, lagRampFrame, "Ramp Response")
