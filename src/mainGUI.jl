@@ -5,9 +5,9 @@
 # Eusebio Bolaños Reynoso
 # Joaquín Pinto Espinoza
 
-using Gtk.ShortNames, ControlSystems, Plots, SymPy
+using Gtk.ShortNames, ControlSystems, Plots
 using Mustache, DataFrames, DefaultApplication, Dates, Printf
-import Latexify
+import Latexify, SymPy
 pyplot()
 
 # CSS Provider
@@ -204,7 +204,7 @@ function LLAGUI()
                     ωn, ζ, ps = damp(Gcerr)
 
                     # Kv
-                    s = symbols("s", real=true)
+                    s = SymPy.symbols("s", real=true)
 
                     global GrealNum = 0
                     global GrealDen = 0
@@ -219,10 +219,10 @@ function LLAGUI()
 
                     Greal = GrealNum/GrealDen
 
-                    Kv = limit(Greal*s, s, 0)
+                    Kv = SymPy.limit(Greal*s, s, 0)
 
                     # TFopen image
-                    msgtex = Latexify.latexify(string("G(s)=", simplify(Greal)))
+                    msgtex = Latexify.latexify(string("G(s)=", SymPy.simplify(Greal)))
                     L =
                     """\\documentclass[border=2pt]{standalone}
                     \\usepackage{mathtools}
@@ -244,7 +244,7 @@ function LLAGUI()
                     set_gtk_property!(gRootUpTFImg, :file, "C:\\Windows\\Temp\\TFopen-1.png")
 
                     # TFcerr image
-                    GcerrTex = simplify(Greal/(Greal+1))
+                    GcerrTex = SymPy.simplify(Greal/(Greal+1))
                     msgtexcerr = Latexify.latexify(string("G(s)=", GcerrTex))
                     L =
                     """\\documentclass[border=2pt]{standalone}
@@ -282,7 +282,7 @@ function LLAGUI()
                     listRoot[1,2] = ωn[1]
                     listRoot[2,2] = ζ[1]
                     listRoot[3,2] = string(ps)
-                    listRoot[4,2] = N(Kv)
+                    listRoot[4,2] = SymPy.N(Kv)
                     listRoot[5,2] = tR
                     listRoot[6,2] = Tp
                     listRoot[7,2] = PO
@@ -407,7 +407,7 @@ function LLAGUI()
                         ωn1, ζ1, ps1 = damp(Gcerr)
 
                         # Kv
-                        s = symbols("s", real=true)
+                        s = SymPy.symbols("s", real=true)
 
                         global GrealNum = 0
                         global GrealDen = 0
@@ -422,10 +422,10 @@ function LLAGUI()
 
                         Greal1 = GrealNum/GrealDen
 
-                        Kv1 = limit(Greal1*s, s, 0)
+                        Kv1 = SymPy.limit(Greal1*s, s, 0)
 
                         # TFopen image
-                        msgtex = Latexify.latexify(string("G(s)=", simplify(Greal1)))
+                        msgtex = Latexify.latexify(string("G(s)=", SymPy.simplify(Greal1)))
                         L =
                         """\\documentclass[border=2pt]{standalone}
                         \\usepackage{mathtools}
@@ -447,7 +447,7 @@ function LLAGUI()
                         set_gtk_property!(lagTFOpenImg, :file, "C:\\Windows\\Temp\\lagTFopen-1.png")
 
                         # TFcerr image
-                        GcerrTex1 = simplify(Greal1/(Greal1+1))
+                        GcerrTex1 = SymPy.simplify(Greal1/(Greal1+1))
                         msgtexcerr = Latexify.latexify(string("G(s)=", GcerrTex1))
                         L =
                         """\\documentclass[border=2pt]{standalone}
@@ -484,7 +484,7 @@ function LLAGUI()
                         tR1 = (π-beta1)/ωn1[1]
 
                         # β
-                        β = lagKvNum / N(Kv1)
+                        β = lagKvNum / SymPy.N(Kv1)
 
                         # Zero
                         global Zero = -1 / lagTNum
@@ -533,8 +533,8 @@ function LLAGUI()
                         tR2 = (π-beta2)/ωn2[2]
 
                         Greal2 = subs(Greal1, s, ps2[2])
-                        Greal2 = simplify(Greal2)
-                        ϕ = atand(imag(N(Greal2)) / real(N(Greal2)))
+                        Greal2 = SymPy.simplify(Greal2)
+                        ϕ = atand(imag(SymPy.N(Greal2)) / real(SymPy.N(Greal2)))
 
                         Kc = 1 / sqrt((imag(Greal2)^2) + (real(Greal2)^2))
 
@@ -549,7 +549,7 @@ function LLAGUI()
                         listLag[3,2] = string(ps1)
                         listLag[3,3] = string(ps2)
 
-                        listLag[4,2] = N(Kv1)
+                        listLag[4,2] = SymPy.N(Kv1)
                         listLag[4,3] = lagKvNum
 
                         listLag[5,2] = tR1
@@ -609,7 +609,7 @@ function LLAGUI()
 
                         # TFCopen image
                         TFCopen = Kc*Greal1*((1*s-Zero)/(1*s-Pole))
-                        msgtex = Latexify.latexify(string("Gc(s)*G(s)=", simplify(TFCopen)))
+                        msgtex = Latexify.latexify(string("Gc(s)*G(s)=", SymPy.simplify(TFCopen)))
                         L =
                         """\\documentclass[border=2pt]{standalone}
                         \\usepackage{mathtools}
@@ -633,7 +633,7 @@ function LLAGUI()
                         # TFCopen image
                         TFCopen = Kc*Greal1*((1*s-Zero)/(1*s-Pole))
                         TFCcerr = TFCopen/(1 + TFCopen)
-                        msgtex = Latexify.latexify(string("C(s)/R(s)=", simplify(TFCcerr)))
+                        msgtex = Latexify.latexify(string("C(s)/R(s)=", SymPy.simplify(TFCcerr)))
                         L =
                         """\\documentclass[border=2pt]{standalone}
                         \\usepackage{mathtools}
