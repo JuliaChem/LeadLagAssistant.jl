@@ -9,6 +9,7 @@ This is an unregistered package, to install on julia 1.4.2 or later please open 
 
 ---
 Developed at Instituto Tecnológico de Orizaba/TecNM
+  - Dr. Kelvyn Baruc Sánchez Sánchez 
   - Dr. Eusebio Bolaños Reynoso
   - Dr. Joaquín Pinto Espinoza
   - ChE. Carolina Ayerim Bolaños Ruiz
